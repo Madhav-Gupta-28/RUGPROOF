@@ -6,6 +6,7 @@ import { useWebSocket } from './hooks/useWebSocket';
 import { ChatPage } from './pages/ChatPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { EconomicsPage } from './pages/EconomicsPage';
+import { GuardianHookPage } from './pages/GuardianHookPage';
 import { PortfolioPage } from './pages/PortfolioPage';
 import { ScanPage } from './pages/ScanPage';
 import { SecurityPage } from './pages/SecurityPage';
@@ -31,6 +32,7 @@ export function App() {
           <Route path="/economics" element={<EconomicsPage />} />
           <Route path="/system" element={<SystemPage />} />
           <Route path="/scan" element={<ScanPage />} />
+          <Route path="/guardian-hook" element={<GuardianHookPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

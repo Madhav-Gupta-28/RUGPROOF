@@ -89,8 +89,14 @@ RUGPROOF (Guardian Hook)
 
 **One-line summary**
 ```
-The first risk-gated Uniswap v4 pool on X Layer mainnet — swaps into honeypot tokens revert in beforeSwap, and victims of later DANGER flips claim on-chain refunds from a Shield Reserve. Powered by the RUGNOT Guardian engine.
+The first risk-gated Uniswap v4 pool on X Layer mainnet — swaps into honeypot tokens revert in beforeSwap, and victims of later DANGER flips claim on-chain refunds from a Shield Reserve. Powered by the RUGNOT Guardian engine. Live interactive demo: /guardian-hook dashboard (connect wallet → Attempt rug-buy → GuardianBlocked decoded on-screen).
 ```
+
+**Live demo URL** (run `npm run dev -w @rugnot/dashboard`, then open)
+```
+http://localhost:5173/guardian-hook
+```
+Judges: connect MetaMask/OKX Wallet on X Layer (196), click **Attempt rug-buy** — page eth_calls the live SwapHelper and decodes `GuardianBlocked(RUG)` from the PoolManager-wrapped revert.
 
 **GitHub repo**
 ```
@@ -155,13 +161,29 @@ What's novel:
 3. Reuses RUGNOT's 5-layer Guardian pipeline (contract safety, holders, smart money, liquidity, simulation) as the oracle signal.
 
 All 4 demo transactions are verifiable on OKLink. Three Foundry tests pass (forge test). Repo: github.com/Madhav-Gupta-28/RUGPROOF.
+
+Live dashboard at packages/dashboard — route /guardian-hook polls mainnet every 15s (RUG verdict, reserve, exposure), shows all deployment addresses + OKLink tx grid, and includes an interactive rug-proof swap panel that decodes GuardianBlocked from WrappedError revert data via direct RPC eth_call (no tx sent, no gas).
 ```
 
 ---
 
 ## 6. Video recording script (90 seconds, one take, OBS or QuickTime)
 
-**Setup before recording:**
+**Recommended setup (dashboard-first — highest visual impact):**
+- Browser: `http://localhost:5173/guardian-hook` (run `npm run dev -w @rugnot/dashboard`)
+- OKX Wallet or MetaMask on X Layer (196)
+- Second browser tab on OKLink for tx tiles
+
+**Dashboard beat sheet (preferred):**
+```
+0:00 — Show hero: DANGER badge pulsing, live reserve + exposure cards
+0:15 — Click Connect wallet → Attempt rug-buy → green "Hook blocked the swap" with GuardianBlocked(RUG)
+0:35 — Click each of the 4 OKLink tx tiles (Tx A–D) — tabs open on OKLink
+0:75 — Scroll verification CLI block; paste one cast call, show riskOf=3
+0:90 — Cut. Repo URL on screen.
+```
+
+**Fallback setup (terminal + OKLink):**
 - Terminal window, ~24pt font, dark background
 - Browser tab on https://www.oklink.com/x-layer (X Layer explorer)
 - Have these copied into the clipboard buffer (use `pbpaste`/`pbcopy`):

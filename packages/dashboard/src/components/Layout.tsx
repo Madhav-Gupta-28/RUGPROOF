@@ -5,6 +5,7 @@ import { useRugnotStore } from '../store';
 
 const links = [
   { to: '/scan', label: 'scan ✦' },
+  { to: '/guardian-hook', label: 'hook ⛓' },
   { to: '/portfolio', label: 'portfolio' },
   { to: '/security', label: 'security' },
   { to: '/economics', label: 'economics' },

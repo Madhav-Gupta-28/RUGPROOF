@@ -1,0 +1,347 @@
+// Live mainnet constants for the RUGPROOF Guardian Hook on X Layer (chainId 196).
+// All reads/writes go directly to the public RPC — no agent backend required.
+
+export const XLAYER_RPC = 'https://rpc.xlayer.tech';
+export const XLAYER_CHAIN_ID = 196;
+export const XLAYER_CHAIN_ID_HEX = '0xc4';
+
+export const ADDR = {
+  agent: '0x4aa3af8C732a19Ec9534Fb56316497215E52Fc3c',
+  riskOracle: '0x999499a47495bA2005E5ceB06f192F45Bbcd2F50',
+  guardianHook: '0xC68E22886fA481AD38bC4810b12Bdf9991F350C0',
+  base: '0xb437E753142759A386548Ef00e8E1775d1A2A338',
+  rug: '0xB585ABBB035832c0b357a66F1c338C0A34d41482',
+  swapHelper: '0xBfac0c2d0275e904c9724A2f5c175d3c683cD5E5',
+  poolManager: '0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32',
+} as const;
+
+export const POOL_ID =
+  '0x3deafd666a3c89135451dc888e3ee158fbeb0e6ea55ba4cd8f94e8561d5a14e2';
+
+export const HOOK_SALT =
+  '0x000000000000000000000000000000000000000000000000000000000000068d';
+
+// Function selectors (computed offline with `cast sig`).
+export const SEL = {
+  riskOf: '0x9192724e',
+  scoreBpsOf: '0xcf4bec05',
+  updatedAt: '0xe46f7d51',
+  reserve: '0x432ced04',
+  exposure: '0xfbab20a1',
+  claimed: '0xdfcae622',
+  guards: '0xc9ffc90c',
+  owner: '0x8da5cb5b',
+  balanceOf: '0x70a08231',
+  // GuardianBlocked(address) custom error
+  guardianBlocked: '0xcd02b39b',
+} as const;
+
+// Prebuilt calldata for PoolSwapTest.swap(BASE→RUG, exactIn 50e18).
+// Will revert with GuardianBlocked(RUG) while RUG = DANGER on the oracle.
+export const SWAP_CALLDATA_RUG_BUY =
+  '0x2229d0b4000000000000000000000000b437e753142759a386548ef00e8e1775d1a2a338000000000000000000000000b585abbb035832c0b357a66f1c338c0a34d414820000000000000000000000000000000000000000000000000000000000000bb8000000000000000000000000000000000000000000000000000000000000003c000000000000000000000000c68e22886fa481ad38bc4810b12bdf9991f350c00000000000000000000000000000000000000000000000000000000000000001fffffffffffffffffffffffffffffffffffffffffffffffd4a1c50e94e78000000000000000000000000000000000000000000000000000000000001000276a40000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000000';
+
+export const RISK_LABELS = ['UNKNOWN', 'OK', 'CAUTION', 'DANGER'] as const;
+export type RiskLevel = (typeof RISK_LABELS)[number];
+
+// ---------- RPC primitives ----------
+
+type RpcParam = unknown;
+
+let _id = 1;
+async function rpc<T = unknown>(method: string, params: RpcParam[] = []): Promise<T> {
+  const res = await fetch(XLAYER_RPC, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: _id++, method, params }),
+  });
+  const json = await res.json();
+  if (json.error) {
+    const err: Error & { data?: string } = new Error(json.error.message || 'RPC error');
+    err.data = json.error.data;
+    throw err;
+  }
+  return json.result;
+}
+
+function pad32(hex: string): string {
+  return hex.replace(/^0x/, '').toLowerCase().padStart(64, '0');
+}
+
+function encodeCall(selector: string, args: string[] = []): string {
+  return selector + args.map(pad32).join('');
+}
+
+async function ethCall(to: string, data: string, from?: string): Promise<string> {
+  const call: Record<string, string> = { to, data };
+  if (from) call.from = from;
+  return rpc<string>('eth_call', [call, 'latest']);
+}
+
+// ---------- Decoders ----------
+
+function hexToBigInt(hex: string): bigint {
+  return BigInt(hex);
+}
+
+function hexToAddress(hex: string): string {
+  return '0x' + hex.slice(-40);
+}
+
+function hexToBool(hex: string): boolean {
+  return BigInt(hex) !== 0n;
+}
+
+// ---------- Read API ----------
+
+export type GuardianHookState = {
+  oracleOwner: string;
+  hookOwner: string;
+  hookOracle: string;
+  riskOf: { rug: number; base: number };
+  scoreBps: number;
+  reserveWei: bigint;
+  exposureWei: bigint; // agent address (the demo buyer)
+  claimedByAgent: boolean;
+  guards: {
+    protectedToken: string;
+    baseToken: string;
+    refundCapBps: number;
+    initialized: boolean;
+  };
+  baseBalanceOfHookWei: bigint;
+  fetchedAt: number;
+};
+
+export async function fetchGuardianHookState(): Promise<GuardianHookState> {
+  const id = pad32(POOL_ID);
+  const agentArg = pad32(ADDR.agent);
+
+  const [
+    oracleOwner,
+    hookOwner,
+    hookOracleAddr,
+    riskRug,
+    riskBase,
+    score,
+    reserveHex,
+    exposureHex,
+    claimedHex,
+    guardsHex,
+    baseBalHookHex,
+  ] = await Promise.all([
+    ethCall(ADDR.riskOracle, SEL.owner).then(hexToAddress),
+    ethCall(ADDR.guardianHook, SEL.owner).then(hexToAddress),
+    ethCall(ADDR.guardianHook, '0x7dc0d1d0' /* oracle() */).catch(() => '0x').then(hexToAddress),
+    ethCall(ADDR.riskOracle, encodeCall(SEL.riskOf, [ADDR.rug])).then((h) => Number(hexToBigInt(h))),
+    ethCall(ADDR.riskOracle, encodeCall(SEL.riskOf, [ADDR.base])).then((h) => Number(hexToBigInt(h))),
+    ethCall(ADDR.riskOracle, encodeCall(SEL.scoreBpsOf, [ADDR.rug])).then((h) => Number(hexToBigInt(h))),
+    ethCall(ADDR.guardianHook, SEL.reserve + id),
+    ethCall(ADDR.guardianHook, SEL.exposure + id + agentArg),
+    ethCall(ADDR.guardianHook, SEL.claimed + id + agentArg),
+    ethCall(ADDR.guardianHook, SEL.guards + id),
+    ethCall(ADDR.base, encodeCall(SEL.balanceOf, [ADDR.guardianHook])),
+  ]);
+
+  // guards layout: (address, address, uint16, bool) — 4 x 32-byte words
+  const w0 = guardsHex.slice(2, 66);
+  const w1 = guardsHex.slice(66, 130);
+  const w2 = guardsHex.slice(130, 194);
+  const w3 = guardsHex.slice(194, 258);
+
+  return {
+    oracleOwner,
+    hookOwner,
+    hookOracle: hookOracleAddr,
+    riskOf: { rug: riskRug, base: riskBase },
+    scoreBps: score,
+    reserveWei: hexToBigInt(reserveHex),
+    exposureWei: hexToBigInt(exposureHex),
+    claimedByAgent: hexToBool(claimedHex),
+    guards: {
+      protectedToken: hexToAddress('0x' + w0),
+      baseToken: hexToAddress('0x' + w1),
+      refundCapBps: Number(hexToBigInt('0x' + w2)),
+      initialized: hexToBool('0x' + w3),
+    },
+    baseBalanceOfHookWei: hexToBigInt(baseBalHookHex),
+    fetchedAt: Date.now(),
+  };
+}
+
+// ---------- Wallet: "Try the rug-proof swap" ----------
+
+declare global {
+  interface Window {
+    ethereum?: {
+      request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+      on?: (event: string, cb: (...args: unknown[]) => void) => void;
+    };
+  }
+}
+
+export type SwapAttemptResult =
+  | { kind: 'reverted'; reason: string; rawData?: string }
+  | { kind: 'reverted-unknown'; rawError: string }
+  | { kind: 'succeeded-unexpected'; txHash: string }
+  | { kind: 'no-wallet' }
+  | { kind: 'wrong-chain'; chainIdSeen: string };
+
+export async function connectWallet(): Promise<string> {
+  if (!window.ethereum) throw new Error('No injected wallet found. Install MetaMask / OKX Wallet.');
+  const accounts = (await window.ethereum.request({ method: 'eth_requestAccounts' })) as string[];
+  return accounts[0];
+}
+
+export async function ensureXLayer(): Promise<void> {
+  if (!window.ethereum) throw new Error('No injected wallet');
+  const chainId = (await window.ethereum.request({ method: 'eth_chainId' })) as string;
+  if (chainId.toLowerCase() === XLAYER_CHAIN_ID_HEX) return;
+  try {
+    await window.ethereum.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: XLAYER_CHAIN_ID_HEX }],
+    });
+  } catch {
+    // Add chain if missing
+    await window.ethereum.request({
+      method: 'wallet_addEthereumChain',
+      params: [
+        {
+          chainId: XLAYER_CHAIN_ID_HEX,
+          chainName: 'X Layer',
+          rpcUrls: [XLAYER_RPC],
+          nativeCurrency: { name: 'OKB', symbol: 'OKB', decimals: 18 },
+          blockExplorerUrls: ['https://www.oklink.com/x-layer'],
+        },
+      ],
+    });
+  }
+}
+
+/**
+ * Simulate the rug-buy swap from the user's wallet via eth_call.
+ * No tokens move. No gas spent. The hook reverts BEFORE token transfer in beforeSwap,
+ * so users without BASE balance still see GuardianBlocked(RUG) as the failure reason.
+ */
+export async function simulateRugProofSwap(from: string): Promise<SwapAttemptResult> {
+  // Check chain if a wallet is connected, but don't require one — direct RPC works either way.
+  if (window.ethereum) {
+    try {
+      const chainId = (await window.ethereum.request({ method: 'eth_chainId' })) as string;
+      if (chainId.toLowerCase() !== XLAYER_CHAIN_ID_HEX) {
+        return { kind: 'wrong-chain', chainIdSeen: chainId };
+      }
+    } catch {
+      // ignore, fall through to direct RPC
+    }
+  }
+
+  // Direct RPC eth_call. We get clean JSON-RPC error with the wrapped revert data
+  // so decoding GuardianBlocked is reliable across wallets.
+  try {
+    const result = await rpc<string>('eth_call', [
+      { from, to: ADDR.swapHelper, data: SWAP_CALLDATA_RUG_BUY },
+      'latest',
+    ]);
+    return { kind: 'succeeded-unexpected', txHash: result };
+  } catch (err: unknown) {
+    return decodeSwapError(err);
+  }
+}
+
+function extractErrorData(err: unknown): string | undefined {
+  const anyErr = err as { data?: unknown; message?: string; error?: { data?: unknown; message?: string } };
+  if (typeof anyErr?.data === 'string') return anyErr.data;
+  if (anyErr?.data && typeof anyErr.data === 'object') {
+    const inner = anyErr.data as { data?: unknown; originalError?: { data?: string } };
+    if (typeof inner.data === 'string') return inner.data;
+    if (inner.originalError?.data) return inner.originalError.data;
+  }
+  if (anyErr?.error && typeof anyErr.error === 'object') {
+    const e = anyErr.error;
+    if (typeof e.data === 'string') return e.data;
+  }
+  return undefined;
+}
+
+function decodeSwapError(err: unknown): SwapAttemptResult {
+  const anyErr = err as { message?: string };
+  const dataHex = extractErrorData(err);
+
+  // The PoolManager wraps hook reverts in WrappedError(address,bytes4,bytes,bytes)
+  // so GuardianBlocked(address) lives inside the returnData field.
+  // Search for the selector anywhere in the hex blob and pull the next 32-byte word.
+  if (dataHex) {
+    const sel = SEL.guardianBlocked.slice(2).toLowerCase();
+    const cleaned = dataHex.toLowerCase();
+    const idx = cleaned.indexOf(sel);
+    if (idx >= 0) {
+      const tokenWord = cleaned.slice(idx + 8, idx + 8 + 64);
+      const token = '0x' + tokenWord.slice(-40);
+      return {
+        kind: 'reverted',
+        reason: `GuardianBlocked(${token})`,
+        rawData: dataHex,
+      };
+    }
+  }
+
+  // Some wallets stringify the revert reason into the message.
+  if (anyErr?.message && /GuardianBlocked/i.test(anyErr.message)) {
+    return { kind: 'reverted', reason: 'GuardianBlocked(RUG)', rawData: dataHex };
+  }
+
+  return {
+    kind: 'reverted-unknown',
+    rawError: anyErr?.message ?? JSON.stringify(err),
+  };
+}
+
+// ---------- Demo transactions ----------
+
+export const DEMO_TXS = [
+  {
+    step: 'A',
+    label: 'OK swap succeeds (100 BASE → RUG)',
+    hash: '0xc1e000adb73abc2161cc540d767fd8459fac1e95556715631a2520343880845d',
+  },
+  {
+    step: 'B',
+    label: 'setRisk(RUG, DANGER)',
+    hash: '0x08b3d9bf745a8cdd5a2d68a67d41930588cd5526ec6c5168d055420ac04c0f5e',
+  },
+  {
+    step: 'C',
+    label: 'Swap reverts → GuardianBlocked(RUG)',
+    hash: '0xea871ff345cfe4c79ea58a18c08da45088166236676b34ff8184352e265e9c0b',
+  },
+  {
+    step: 'D',
+    label: 'claimRefund — buyer recovers BASE from reserve',
+    hash: '0x5ce473dcb5027700d6b4f993563f1c63530b40ec6fbce507baea3433f1950696',
+  },
+] as const;
+
+export const AGENT_PUSH_TX =
+  '0xfb17a276146d734431abd1531c652b631d96515550a2c4c5ecb4ae203ca3a393';
+
+export function okLinkTx(hash: string): string {
+  return `https://www.oklink.com/x-layer/tx/${hash}`;
+}
+
+export function okLinkAddr(addr: string): string {
+  return `https://www.oklink.com/x-layer/address/${addr}`;
+}
+
+export function formatEther(wei: bigint, decimals = 4): string {
+  const whole = wei / 10n ** 18n;
+  const frac = wei % 10n ** 18n;
+  const fracStr = frac.toString().padStart(18, '0').slice(0, decimals);
+  return `${whole.toString()}.${fracStr}`;
+}
+
+export function shortAddr(a: string, left = 6, right = 4): string {
+  if (!a || a.length < left + right + 2) return a;
+  return `${a.slice(0, left)}…${a.slice(-right)}`;
+}
