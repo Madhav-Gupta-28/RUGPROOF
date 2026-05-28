@@ -9,7 +9,9 @@ import { executeOpportunity, executeSell } from './executor.js';
 import {
   XLAYER_TOKENS,
   fetchTokenPrice,
+  getProvider,
   getMarketPriceInfo,
+  getSigner,
   getWalletStableBalances,
   verifyOkxCredentials,
 } from './okx-api.js';
@@ -28,6 +30,10 @@ const MAINNET_DEMO_REQUIRED_BUYS = 3;
 const MAINNET_DEMO_TARGET_USDT = 1;
 const MAINNET_DEMO_MAX_MONITOR_MS = 55_000;
 const MAINNET_DEMO_ESTIMATED_OVERHEAD_MS = 45_000;
+const GUARDIAN_SWAP_HELPER = process.env.GUARDIAN_SWAP_HELPER ?? '0xBfac0c2d0275e904c9724A2f5c175d3c683cD5E5';
+const GUARDIAN_SWAP_CALLDATA =
+  '0x2229d0b4000000000000000000000000b437e753142759a386548ef00e8e1775d1a2a338000000000000000000000000b585abbb035832c0b357a66f1c338c0a34d414820000000000000000000000000000000000000000000000000000000000000bb8000000000000000000000000000000000000000000000000000000000000003c000000000000000000000000c68e22886fa481ad38bc4810b12bdf9991f350c00000000000000000000000000000000000000000000000000000000000000001fffffffffffffffffffffffffffffffffffffffffffffffd4a1c50e94e78000000000000000000000000000000000000000000000000000000000001000276a40000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000000';
+const GUARDIAN_SWAP_GAS_LIMIT = 500_000n;
 
 let mainnetDemoInFlight = false;
 let lastMainnetDemoStartedAt = 0;
@@ -68,12 +74,55 @@ export function createPublicRouter(state: StateStore): Router {
     }
 
     try {
-      const verdict = await vetToken(tokenAddress);
+      const verdict = await vetToken(tokenAddress, 'entry', { pushOnchain: false });
       state.addVerdict(verdict);
       return res.json(verdict);
     } catch (error) {
       console.error('[Public Scan] Guardian failed:', error);
       return res.status(500).json({ error: 'scan_failed', message: 'Guardian scan failed. Try again.' });
+    }
+  });
+
+  router.post('/api/public/guardian-hook/try-swap', async (_req: Request, res: Response) => {
+    const signer = getSigner();
+    if (!signer) {
+      return res.status(409).json({
+        error: 'signer_unavailable',
+        message: 'Agent signer is unavailable. Set PRIVATE_KEY in the agent environment.',
+      });
+    }
+
+    try {
+      const tx = await signer.sendTransaction({
+        to: GUARDIAN_SWAP_HELPER,
+        data: GUARDIAN_SWAP_CALLDATA,
+        gasLimit: GUARDIAN_SWAP_GAS_LIMIT,
+      });
+
+      const receipt = await getProvider().waitForTransaction(tx.hash, 1, 120_000);
+      if (!receipt) {
+        return res.status(504).json({
+          error: 'receipt_timeout',
+          txHash: tx.hash,
+          message: 'Transaction was sent but receipt polling timed out.',
+        });
+      }
+
+      return res.json({
+        ok: true,
+        txHash: tx.hash,
+        status: receipt.status === 1 ? 'success' : 'reverted',
+        from: tx.from,
+        to: tx.to,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+      });
+    } catch (error) {
+      console.error('[Guardian Hook] try-swap failed:', error);
+      return res.status(500).json({
+        error: 'swap_submit_failed',
+        message: error instanceof Error ? error.message : 'Swap broadcast failed.',
+      });
     }
   });
 

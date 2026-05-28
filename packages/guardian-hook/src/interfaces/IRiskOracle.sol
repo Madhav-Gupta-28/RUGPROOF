@@ -13,3 +13,16 @@ interface IRiskOracle {
     function scoreBpsOf(address token) external view returns (uint16);
     function updatedAt(address token) external view returns (uint256);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+

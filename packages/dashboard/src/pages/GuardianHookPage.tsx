@@ -16,9 +16,8 @@ import {
   okLinkTx,
   scanTokenForSimulation,
   shortAddr,
-  simulateAllowCaseSwap,
   simulateRugProofSwap,
-  type AllowCaseResult,
+  triggerAgentWalletSwap,
   type GuardianHookState,
   type ScanOutcome,
   type SwapAttemptResult,
@@ -321,6 +320,14 @@ function Stat({ label, value, unit, valueClass, hint }: { label: string; value: 
   );
 }
 
+type RealSwapState = {
+  busy: boolean;
+  txHash?: string;
+  status?: 'success' | 'reverted';
+  from?: string;
+  error?: string;
+};
+
 // ============================================================
 // Token simulator — paste any X Layer token, see what the hook would do
 // ============================================================
@@ -331,10 +338,7 @@ function TokenSimulator() {
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<ScanOutcome | null>(null);
   const [err, setErr] = useState('');
-  const [liveBusy, setLiveBusy] = useState(false);
-  const [liveResult, setLiveResult] = useState<SwapAttemptResult | null>(null);
-  const [allowBusy, setAllowBusy] = useState(false);
-  const [allowResult, setAllowResult] = useState<AllowCaseResult | null>(null);
+  const [realSwap, setRealSwap] = useState<RealSwapState | null>(null);
 
   const run = async (addressOverride?: string) => {
     const addr = (addressOverride ?? input).trim();
@@ -345,7 +349,7 @@ function TokenSimulator() {
     setBusy(true);
     setErr('');
     setOutcome(null);
-    setLiveResult(null);
+    setRealSwap(null);
     if (addressOverride) setInput(addressOverride);
     setScannedAddr(addr);
     try {
@@ -358,26 +362,18 @@ function TokenSimulator() {
     }
   };
 
-  const runLive = async () => {
-    setLiveBusy(true);
-    setLiveResult(null);
-    setAllowResult(null);
+  const runRealSwap = async () => {
+    setRealSwap({ busy: true });
     try {
-      const r = await simulateRugProofSwap('0x000000000000000000000000000000000000dEaD');
-      setLiveResult(r);
-    } finally {
-      setLiveBusy(false);
-    }
-  };
-
-  const runAllowCase = async () => {
-    setAllowBusy(true);
-    setAllowResult(null);
-    try {
-      const r = await simulateAllowCaseSwap(ADDR.agent);
-      setAllowResult(r);
-    } finally {
-      setAllowBusy(false);
+      const result = await triggerAgentWalletSwap();
+      setRealSwap({
+        busy: false,
+        txHash: result.txHash,
+        status: result.status,
+        from: result.from,
+      });
+    } catch (e) {
+      setRealSwap({ busy: false, error: e instanceof Error ? e.message : 'Transaction failed' });
     }
   };
 
@@ -452,12 +448,8 @@ function TokenSimulator() {
             <SimulatorOutcome
               outcome={outcome}
               hasLivePool={hasLivePool}
-              onVerifyLive={() => void runLive()}
-              liveBusy={liveBusy}
-              liveResult={liveResult}
-              onTryAllowCase={() => void runAllowCase()}
-              allowBusy={allowBusy}
-              allowResult={allowResult}
+              onRunRealSwap={() => void runRealSwap()}
+              realSwap={realSwap}
             />
           )}
         </div>
@@ -469,21 +461,13 @@ function TokenSimulator() {
 function SimulatorOutcome({
   outcome,
   hasLivePool,
-  onVerifyLive,
-  liveBusy,
-  liveResult,
-  onTryAllowCase,
-  allowBusy,
-  allowResult,
+  onRunRealSwap,
+  realSwap,
 }: {
   outcome: ScanOutcome;
   hasLivePool: boolean;
-  onVerifyLive: () => void;
-  liveBusy: boolean;
-  liveResult: SwapAttemptResult | null;
-  onTryAllowCase: () => void;
-  allowBusy: boolean;
-  allowResult: AllowCaseResult | null;
+  onRunRealSwap: () => void;
+  realSwap: RealSwapState | null;
 }) {
   const decision = outcome.hookDecision;
   const decisionLabel =
@@ -548,16 +532,14 @@ function SimulatorOutcome({
         </p>
       )}
 
-      {/* Live verification — only available when a real pool exists for this token */}
-      {decision === 'BLOCK' && (
+      {/* Live swap button — only for the deployed demo pool token */}
+      {(decision === 'BLOCK' || decision === 'ALLOW') && (
         <div className="mt-5 pt-5 border-t border-border/60">
           {hasLivePool ? (
-            <ProofPanel
-              onClick={onVerifyLive}
-              busy={liveBusy || allowBusy}
-              revertResult={liveResult}
-              allowResult={allowResult}
-              onAllow={onTryAllowCase}
+            <TryYourselfPanel
+              expected={decision === 'BLOCK' ? 'reverted' : 'success'}
+              onRunRealSwap={onRunRealSwap}
+              realSwap={realSwap}
             />
           ) : (
             <NoLivePoolNote />
@@ -569,186 +551,73 @@ function SimulatorOutcome({
 }
 
 // ============================================================
-// ProofPanel — side-by-side "DANGER reverts" vs "OK succeeds"
+// TryYourselfPanel — one real swap button, live tx hash
 // ============================================================
 
-function ProofPanel({
-  onClick,
-  busy,
-  revertResult,
-  allowResult,
-  onAllow,
+function TryYourselfPanel({
+  expected,
+  onRunRealSwap,
+  realSwap,
 }: {
-  onClick: () => void;
-  busy: boolean;
-  revertResult: SwapAttemptResult | null;
-  allowResult: AllowCaseResult | null;
-  onAllow: () => void;
+  expected: 'reverted' | 'success';
+  onRunRealSwap: () => void;
+  realSwap: RealSwapState | null;
 }) {
-  // Auto-fire the allow-case the moment the revert proof lands.
-  useEffect(() => {
-    if (revertResult?.kind === 'reverted' && !allowResult) {
-      onAllow();
-    }
-  }, [revertResult, allowResult, onAllow]);
-
-  const hasResults = !!revertResult;
-
-  if (!hasResults) {
-    return (
-      <div>
-        <div className="font-mono text-[10px] uppercase tracking-widest text-secondary/70 mb-3">
-          Prove it on mainnet, in real time
-        </div>
-        <button
-          onClick={onClick}
-          disabled={busy}
-          className="w-full border-2 border-primary bg-primary/5 hover:bg-primary/10 px-4 py-4 font-sans text-base font-bold text-primary transition disabled:opacity-50"
-        >
-          {busy ? 'Querying X Layer mainnet…' : '▶ Run both swaps live'}
-        </button>
-        <p className="mt-2 font-mono text-[10px] text-secondary/50">
-          Two real eth_calls to the live pool. No gas. ~1 second.
-        </p>
-      </div>
-    );
-  }
-
   return (
-    <div>
-      <div className="flex items-baseline justify-between mb-3">
-        <div className="font-mono text-[10px] uppercase tracking-widest text-secondary/70">
-          Same pool. Same swap. Two oracle states.
-        </div>
-        <button
-          onClick={onClick}
-          disabled={busy}
-          className="font-mono text-[10px] uppercase tracking-widest text-secondary hover:text-primary transition disabled:opacity-40"
-        >
-          {busy ? 'querying…' : '↻ rerun'}
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-px bg-border">
-        <ProofCard
-          state="danger"
-          oracle="RUG = DANGER"
-          status={revertResult?.kind === 'reverted' ? 'REVERTED' : 'pending'}
-          headline={revertResult?.kind === 'reverted' ? 'GuardianBlocked(RUG)' : '…'}
-          subline="hook reverted in beforeSwap"
-          txHash={DEMO_TXS[2].hash}
-          txLabel="Real failed tx on mainnet"
-        />
-        <ProofCard
-          state="ok"
-          oracle="RUG = OK"
-          status={
-            allowResult?.kind === 'succeeded' ? 'SUCCEEDED' :
-            allowResult?.kind === 'override-not-supported' ? 'see Tx A' :
-            'pending'
-          }
-          headline={
-            allowResult?.kind === 'succeeded'
-              ? `+${(Number(allowResult.rugOut) / 1e18).toFixed(2)} RUG`
-              : '…'
-          }
-          subline={
-            allowResult?.kind === 'succeeded'
-              ? `for ${(Number(allowResult.baseIn) / 1e18).toFixed(0)} BASE`
-              : 'swap clears beforeSwap'
-          }
-          txHash={DEMO_TXS[0].hash}
-          txLabel="Real successful tx on mainnet"
-        />
-      </div>
-
-      {/* Raw evidence — collapsed */}
-      <details className="mt-4">
-        <summary className="font-mono text-[10px] uppercase tracking-widest text-secondary/60 cursor-pointer hover:text-primary">
-          + show raw mainnet evidence
-        </summary>
-        <div className="mt-3 space-y-3">
-          {revertResult?.kind === 'reverted' && revertResult.rawData && (
-            <div>
-              <div className="font-mono text-[9px] uppercase tracking-widest text-accent-danger mb-1">
-                wrapped revert bytes (DANGER eth_call)
-              </div>
-              <pre className="font-mono text-[9px] text-secondary/60 bg-bg-surface border border-border p-3 overflow-x-auto break-all whitespace-pre-wrap leading-relaxed">
-                {revertResult.rawData}
-              </pre>
-              <div className="font-mono text-[9px] text-secondary/50 mt-1">
-                PoolManager wraps as <code>WrappedError(hook, beforeSwap, …)</code>; <code>GuardianBlocked(RUG)</code> decoded from returnData.
-              </div>
-            </div>
-          )}
-          {allowResult?.kind === 'succeeded' && (
-            <div>
-              <div className="font-mono text-[9px] uppercase tracking-widest text-accent-safe mb-1">
-                BalanceDelta (OK eth_call, oracle state-override)
-              </div>
-              <pre className="font-mono text-[9px] text-secondary/60 bg-bg-surface border border-border p-3 overflow-x-auto break-all whitespace-pre-wrap leading-relaxed">
-                {allowResult.rawResult}
-              </pre>
-              <div className="font-mono text-[9px] text-secondary/50 mt-1">
-                int256 packing two int128 deltas. Upper 128b = BASE (currency0). Lower 128b = RUG (currency1).
-              </div>
-            </div>
-          )}
-        </div>
-      </details>
-    </div>
-  );
-}
-
-function ProofCard({
-  state,
-  oracle,
-  status,
-  headline,
-  subline,
-  txHash,
-  txLabel,
-}: {
-  state: 'danger' | 'ok';
-  oracle: string;
-  status: string;
-  headline: string;
-  subline: string;
-  txHash: string;
-  txLabel: string;
-}) {
-  const isDanger = state === 'danger';
-  const accent = isDanger ? 'accent-danger' : 'accent-safe';
-  const bg = isDanger ? 'bg-accent-danger/5' : 'bg-accent-safe/5';
-  const accentText = isDanger ? 'text-accent-danger' : 'text-accent-safe';
-
-  return (
-    <div className={`bg-bg ${bg} p-5`}>
-      <div className="flex items-center justify-between mb-3">
-        <span className={`font-mono text-[10px] uppercase tracking-widest ${accentText}`}>
-          {isDanger ? '🛑' : '✅'} {oracle}
-        </span>
-        <span className={`font-mono text-[9px] uppercase tracking-widest px-2 py-0.5 border border-${accent}/40 ${accentText}`}>
-          {status}
-        </span>
-      </div>
-      <div className={`font-sans text-2xl font-bold ${isDanger ? 'text-accent-danger' : 'text-accent-safe'} break-all leading-tight`}>
-        {headline}
-      </div>
-      <div className="font-mono text-[10px] text-secondary/70 mt-1">{subline}</div>
-
-      <a
-        href={okLinkTx(txHash)}
-        target="_blank"
-        rel="noreferrer"
-        className={`mt-4 inline-flex items-center justify-between w-full gap-2 px-3 py-2 border border-${accent}/40 hover:bg-${accent}/10 transition group`}
+    <div className="space-y-3">
+      <button
+        onClick={onRunRealSwap}
+        disabled={realSwap?.busy}
+        className={`w-full border px-4 py-3 font-mono text-[10px] uppercase tracking-widest transition disabled:opacity-50 ${
+          expected === 'reverted'
+            ? 'border-accent-danger/40 bg-accent-danger/5 text-accent-danger hover:bg-accent-danger/10'
+            : 'border-accent-safe/40 bg-accent-safe/5 text-accent-safe hover:bg-accent-safe/10'
+        }`}
       >
-        <span className={`font-mono text-[9px] uppercase tracking-widest ${accentText}`}>
-          {txLabel}
-        </span>
-        <span className={`font-mono text-[9px] ${accentText} group-hover:translate-x-0.5 transition`}>↗</span>
-      </a>
-      <code className="block mt-2 font-mono text-[9px] text-secondary/50 break-all">{txHash}</code>
+        {realSwap?.busy
+          ? 'Broadcasting and waiting for receipt…'
+          : expected === 'reverted'
+          ? 'Try yourself: broadcast real swap (should revert)'
+          : 'Try yourself: broadcast real swap (should succeed)'}
+      </button>
+
+      <p className="font-mono text-[10px] text-secondary/60">
+        Uses the server-side agent wallet on X Layer mainnet. A real tx hash appears only after you click.
+      </p>
+
+      {realSwap?.error && (
+        <p className="font-mono text-[10px] text-accent-danger break-all">{realSwap.error}</p>
+      )}
+
+      {realSwap?.txHash && (
+        <div className="border border-border p-3">
+          <div
+            className={`font-mono text-[10px] uppercase tracking-widest ${
+              realSwap.status === 'success' ? 'text-accent-safe' : 'text-accent-danger'
+            }`}
+          >
+            Tx status: {realSwap.status}
+          </div>
+          <a
+            href={okLinkTx(realSwap.txHash)}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-2 block font-mono text-[10px] text-primary hover:text-accent-safe transition break-all"
+          >
+            {realSwap.txHash} ↗
+          </a>
+          {realSwap.from && (
+            <p className="mt-2 font-mono text-[10px] text-secondary/60">
+              from {shortAddr(realSwap.from)}
+            </p>
+          )}
+          {realSwap.status !== expected && (
+            <p className="mt-2 font-mono text-[10px] text-accent-caution">
+              Expected {expected}, got {realSwap.status}. Check oracle state and wallet approvals.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -758,7 +627,7 @@ function NoLivePoolNote() {
     <div>
       <div className="font-mono text-[10px] uppercase tracking-widest text-secondary/70 mb-2">Want live proof?</div>
       <p className="font-mono text-[11px] text-secondary leading-relaxed">
-        We&apos;ve only deployed one RUGPROOF pool so far — the BASE/RUG demo pair. To prove the revert mechanism on mainnet right now, scroll up and click <strong className="text-primary">&ldquo;Try buying the rug&rdquo;</strong>, or pick <strong className="text-primary">RUG (our mock — DANGER)</strong> above and click <strong className="text-primary">Trigger live revert</strong>. The same hook would behave the same way for this token in a pool that opted in.
+        We&apos;ve only deployed one RUGPROOF pool so far — the BASE/RUG demo pair. For real broadcast swap proof, scan <strong className="text-primary">RUG (our mock)</strong> and use the <strong className="text-primary">Try yourself</strong> button.
       </p>
     </div>
   );

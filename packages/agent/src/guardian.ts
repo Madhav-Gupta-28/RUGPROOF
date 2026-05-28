@@ -214,7 +214,9 @@ function isUnavailable(check: SecurityCheck): boolean {
 export async function vetToken(
   tokenAddress: string,
   context: 'entry' | 'exit' = 'entry',
+  options: { pushOnchain?: boolean } = {},
 ): Promise<Verdict> {
+  const shouldPushOnchain = options.pushOnchain !== false;
   const start = Date.now();
   const checks = await Promise.all([
     checkTokenRisk(tokenAddress),
@@ -236,7 +238,9 @@ export async function vetToken(
       timestamp: Date.now(),
       executionTimeMs: Date.now() - start,
     };
-    maybePushOnchainRisk(tokenAddress, verdict.level, verdict.score * 100);
+    if (shouldPushOnchain) {
+      maybePushOnchainRisk(tokenAddress, verdict.level, verdict.score * 100);
+    }
     return verdict;
   }
 
@@ -261,6 +265,8 @@ export async function vetToken(
     timestamp: Date.now(),
     executionTimeMs: Date.now() - start,
   };
-  maybePushOnchainRisk(tokenAddress, verdict.level, verdict.score * 100);
+  if (shouldPushOnchain) {
+    maybePushOnchainRisk(tokenAddress, verdict.level, verdict.score * 100);
+  }
   return verdict;
 }

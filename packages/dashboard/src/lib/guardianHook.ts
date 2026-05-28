@@ -32,6 +32,7 @@ export const SEL = {
   guards: '0xc9ffc90c',
   owner: '0x8da5cb5b',
   balanceOf: '0x70a08231',
+  setRisk: '0x95d0504b',
   // GuardianBlocked(address) custom error
   guardianBlocked: '0xcd02b39b',
 } as const;
@@ -217,6 +218,101 @@ export async function ensureXLayer(): Promise<void> {
       ],
     });
   }
+}
+
+type TxReceipt = {
+  transactionHash: string;
+  status: '0x0' | '0x1';
+  gasUsed?: string;
+  blockNumber?: string;
+};
+
+async function waitForReceipt(txHash: string, timeoutMs = 120_000): Promise<TxReceipt> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const receipt = await rpc<TxReceipt | null>('eth_getTransactionReceipt', [txHash]);
+    if (receipt) return receipt;
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  }
+  throw new Error('Timed out waiting for transaction receipt');
+}
+
+async function sendWalletTx(input: { from: string; to: string; data: string; gas: string }): Promise<string> {
+  if (!window.ethereum) throw new Error('No injected wallet found');
+  const txHash = (await window.ethereum.request({
+    method: 'eth_sendTransaction',
+    params: [{ from: input.from, to: input.to, data: input.data, gas: input.gas }],
+  })) as string;
+  return txHash;
+}
+
+export type BroadcastSwapResult = {
+  txHash: string;
+  status: 'reverted' | 'success';
+  gasUsedHex?: string;
+};
+
+export type AgentSwapBroadcastResult = {
+  txHash: string;
+  status: 'reverted' | 'success';
+  from?: string;
+  to?: string;
+  gasUsed?: string;
+  blockNumber?: number;
+};
+
+export async function triggerAgentWalletSwap(): Promise<AgentSwapBroadcastResult> {
+  const res = await fetch('/api/public/guardian-hook/try-swap', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(typeof json?.message === 'string' ? json.message : 'Agent swap broadcast failed');
+  }
+  return {
+    txHash: json.txHash as string,
+    status: json.status as 'reverted' | 'success',
+    from: typeof json.from === 'string' ? json.from : undefined,
+    to: typeof json.to === 'string' ? json.to : undefined,
+    gasUsed: typeof json.gasUsed === 'string' ? json.gasUsed : undefined,
+    blockNumber: typeof json.blockNumber === 'number' ? json.blockNumber : undefined,
+  };
+}
+
+export async function broadcastRealSwap(from: string): Promise<BroadcastSwapResult> {
+  const txHash = await sendWalletTx({
+    from,
+    to: ADDR.swapHelper,
+    data: SWAP_CALLDATA_RUG_BUY,
+    gas: '0x7a120', // 500k
+  });
+  const receipt = await waitForReceipt(txHash);
+  return {
+    txHash,
+    status: receipt.status === '0x1' ? 'success' : 'reverted',
+    gasUsedHex: receipt.gasUsed,
+  };
+}
+
+export async function broadcastSetRisk(
+  from: string,
+  risk: 1 | 2 | 3,
+  scoreBps = risk === 1 ? 9000 : risk === 2 ? 5000 : 1000,
+): Promise<BroadcastSwapResult> {
+  const data = encodeCall(SEL.setRisk, [ADDR.rug, `0x${risk.toString(16)}`, `0x${scoreBps.toString(16)}`]);
+  const txHash = await sendWalletTx({
+    from,
+    to: ADDR.riskOracle,
+    data,
+    gas: '0x186a0', // 100k
+  });
+  const receipt = await waitForReceipt(txHash);
+  return {
+    txHash,
+    status: receipt.status === '0x1' ? 'success' : 'reverted',
+    gasUsedHex: receipt.gasUsed,
+  };
 }
 
 /**
