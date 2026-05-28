@@ -314,7 +314,7 @@ export const DEMO_TXS = [
   {
     step: 'C',
     label: 'Swap reverts → GuardianBlocked(RUG)',
-    hash: '0xea871ff345cfe4c79ea58a18c08da45088166236676b34ff8184352e265e9c0b',
+    hash: '0xcfc6156518703d0e48d662b2d79105f49557f709bbe4e19d311fbe012674a0e4',
   },
   {
     step: 'D',

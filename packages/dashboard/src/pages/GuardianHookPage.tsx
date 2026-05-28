@@ -325,9 +325,12 @@ function Stat({ label, value, unit, valueClass, hint }: { label: string; value: 
 
 function TokenSimulator() {
   const [input, setInput] = useState('');
+  const [scannedAddr, setScannedAddr] = useState<string>('');
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<ScanOutcome | null>(null);
   const [err, setErr] = useState('');
+  const [liveBusy, setLiveBusy] = useState(false);
+  const [liveResult, setLiveResult] = useState<SwapAttemptResult | null>(null);
 
   const run = async (addressOverride?: string) => {
     const addr = (addressOverride ?? input).trim();
@@ -338,7 +341,9 @@ function TokenSimulator() {
     setBusy(true);
     setErr('');
     setOutcome(null);
+    setLiveResult(null);
     if (addressOverride) setInput(addressOverride);
+    setScannedAddr(addr);
     try {
       const r = await scanTokenForSimulation(addr);
       setOutcome(r);
@@ -348,6 +353,19 @@ function TokenSimulator() {
       setBusy(false);
     }
   };
+
+  const runLive = async () => {
+    setLiveBusy(true);
+    setLiveResult(null);
+    try {
+      const r = await simulateRugProofSwap('0x000000000000000000000000000000000000dEaD');
+      setLiveResult(r);
+    } finally {
+      setLiveBusy(false);
+    }
+  };
+
+  const hasLivePool = scannedAddr.toLowerCase() === ADDR.rug.toLowerCase();
 
   return (
     <section className="py-14 border-t border-border">
@@ -414,14 +432,34 @@ function TokenSimulator() {
               <div className="font-mono text-[11px] text-secondary/60 animate-pulse">running 5-layer scan…</div>
             </div>
           )}
-          {outcome && <SimulatorOutcome outcome={outcome} />}
+          {outcome && (
+            <SimulatorOutcome
+              outcome={outcome}
+              hasLivePool={hasLivePool}
+              onVerifyLive={() => void runLive()}
+              liveBusy={liveBusy}
+              liveResult={liveResult}
+            />
+          )}
         </div>
       </div>
     </section>
   );
 }
 
-function SimulatorOutcome({ outcome }: { outcome: ScanOutcome }) {
+function SimulatorOutcome({
+  outcome,
+  hasLivePool,
+  onVerifyLive,
+  liveBusy,
+  liveResult,
+}: {
+  outcome: ScanOutcome;
+  hasLivePool: boolean;
+  onVerifyLive: () => void;
+  liveBusy: boolean;
+  liveResult: SwapAttemptResult | null;
+}) {
   const decision = outcome.hookDecision;
   const decisionLabel =
     decision === 'BLOCK' ? 'Hook would REVERT this swap' :
@@ -484,6 +522,82 @@ function SimulatorOutcome({ outcome }: { outcome: ScanOutcome }) {
           agent: {outcome.agentError} — using on-chain oracle only
         </p>
       )}
+
+      {/* Live verification — only available when a real pool exists for this token */}
+      {decision === 'BLOCK' && (
+        <div className="mt-5 pt-5 border-t border-border/60">
+          {hasLivePool ? (
+            <LiveVerify onClick={onVerifyLive} busy={liveBusy} result={liveResult} />
+          ) : (
+            <NoLivePoolNote />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LiveVerify({ onClick, busy, result }: { onClick: () => void; busy: boolean; result: SwapAttemptResult | null }) {
+  if (!result) {
+    return (
+      <div>
+        <div className="font-mono text-[10px] uppercase tracking-widest text-secondary/70 mb-2">Prove it</div>
+        <p className="font-mono text-[11px] text-secondary mb-3 leading-relaxed">
+          We have a live RUGPROOF pool deployed for this token on X Layer mainnet. Click below to send an actual <code className="text-primary">eth_call</code> to the pool — the hook will revert and we&apos;ll show you the raw decoded error.
+        </p>
+        <button
+          onClick={onClick}
+          disabled={busy}
+          className="w-full border-2 border-accent-danger bg-accent-danger/10 hover:bg-accent-danger/20 px-4 py-3 font-mono text-[11px] font-bold tracking-widest uppercase text-accent-danger transition disabled:opacity-50"
+        >
+          {busy ? 'Querying mainnet…' : '▶ Trigger live revert (eth_call)'}
+        </button>
+      </div>
+    );
+  }
+
+  if (result.kind === 'reverted') {
+    return (
+      <div>
+        <div className="font-mono text-[10px] uppercase tracking-widest text-accent-safe mb-2">✓ Verified on mainnet</div>
+        <div className="font-mono text-[13px] text-primary break-all mb-3">{result.reason}</div>
+        <p className="font-mono text-[10px] text-secondary/70 leading-relaxed mb-3">
+          PoolManager wrapped the hook revert as <code className="text-secondary">WrappedError(hook, beforeSwap, …)</code>. The <code className="text-accent-danger">GuardianBlocked(RUG)</code> error was decoded from inside the returnData.
+        </p>
+        {result.rawData && (
+          <details className="mb-3">
+            <summary className="font-mono text-[10px] uppercase tracking-widest text-secondary/60 cursor-pointer hover:text-accent-safe">+ raw revert bytes</summary>
+            <pre className="mt-2 font-mono text-[9px] text-secondary/60 bg-bg-surface border border-border p-3 overflow-x-auto break-all whitespace-pre-wrap leading-relaxed">{result.rawData}</pre>
+          </details>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <a
+            href={okLinkTx(DEMO_TXS[2].hash)}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 border border-accent-danger/40 hover:bg-accent-danger/10 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-accent-danger transition"
+          >
+            See same call as a real tx ↗
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="font-mono text-[11px] text-accent-caution">
+      Live call returned {result.kind} — check console.
+    </div>
+  );
+}
+
+function NoLivePoolNote() {
+  return (
+    <div>
+      <div className="font-mono text-[10px] uppercase tracking-widest text-secondary/70 mb-2">Want live proof?</div>
+      <p className="font-mono text-[11px] text-secondary leading-relaxed">
+        We&apos;ve only deployed one RUGPROOF pool so far — the BASE/RUG demo pair. To prove the revert mechanism on mainnet right now, scroll up and click <strong className="text-primary">&ldquo;Try buying the rug&rdquo;</strong>, or pick <strong className="text-primary">RUG (our mock — DANGER)</strong> above and click <strong className="text-primary">Trigger live revert</strong>. The same hook would behave the same way for this token in a pool that opted in.
+      </p>
     </div>
   );
 }

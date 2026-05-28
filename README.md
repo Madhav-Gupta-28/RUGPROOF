@@ -311,7 +311,7 @@ later DANGER flips claim refunds from an on-chain `ShieldReserve`.
 |------|----|
 | OK swap (success)   | [OKLink](https://www.oklink.com/x-layer/tx/0xc1e000adb73abc2161cc540d767fd8459fac1e95556715631a2520343880845d) |
 | Flip to DANGER      | [OKLink](https://www.oklink.com/x-layer/tx/0x08b3d9bf745a8cdd5a2d68a67d41930588cd5526ec6c5168d055420ac04c0f5e) |
-| DANGER swap (revert)| [OKLink](https://www.oklink.com/x-layer/tx/0xea871ff345cfe4c79ea58a18c08da45088166236676b34ff8184352e265e9c0b) |
+| DANGER swap (revert)| [OKLink](https://www.oklink.com/x-layer/tx/0xcfc6156518703d0e48d662b2d79105f49557f709bbe4e19d311fbe012674a0e4) |
 | Refund claim        | [OKLink](https://www.oklink.com/x-layer/tx/0x5ce473dcb5027700d6b4f993563f1c63530b40ec6fbce507baea3433f1950696) |
 
 Preflight: `cast chain-id --rpc-url $XLAYER_RPC` must return `196`.

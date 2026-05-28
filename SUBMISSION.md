@@ -31,7 +31,7 @@ Everything you need to submit. Copy/paste from each section.
 |---|---|---|---|
 | Tx A | 100 BASE → RUG swap **succeeds** (RUG = OK) | `0xc1e000adb73abc2161cc540d767fd8459fac1e95556715631a2520343880845d` | https://www.oklink.com/x-layer/tx/0xc1e000adb73abc2161cc540d767fd8459fac1e95556715631a2520343880845d |
 | Tx B | `setRisk(RUG, DANGER)` | `0x08b3d9bf745a8cdd5a2d68a67d41930588cd5526ec6c5168d055420ac04c0f5e` | https://www.oklink.com/x-layer/tx/0x08b3d9bf745a8cdd5a2d68a67d41930588cd5526ec6c5168d055420ac04c0f5e |
-| Tx C | Swap **reverts** — `GuardianBlocked(RUG)` | `0xea871ff345cfe4c79ea58a18c08da45088166236676b34ff8184352e265e9c0b` | https://www.oklink.com/x-layer/tx/0xea871ff345cfe4c79ea58a18c08da45088166236676b34ff8184352e265e9c0b |
+| Tx C | Swap **reverts** — `GuardianBlocked(RUG)` | `0xcfc6156518703d0e48d662b2d79105f49557f709bbe4e19d311fbe012674a0e4` | https://www.oklink.com/x-layer/tx/0xcfc6156518703d0e48d662b2d79105f49557f709bbe4e19d311fbe012674a0e4 |
 | Tx D | `claimRefund` — buyer recovers BASE from on-chain reserve | `0x5ce473dcb5027700d6b4f993563f1c63530b40ec6fbce507baea3433f1950696` | https://www.oklink.com/x-layer/tx/0x5ce473dcb5027700d6b4f993563f1c63530b40ec6fbce507baea3433f1950696 |
 | Agent | RUGNOT `pushRisk` writes to oracle | `0xfb17a276146d734431abd1531c652b631d96515550a2c4c5ecb4ae203ca3a393` | https://www.oklink.com/x-layer/tx/0xfb17a276146d734431abd1531c652b631d96515550a2c4c5ecb4ae203ca3a393 |
 | State reset | Re-flip RUG → DANGER for judge verification | `0x5797fcb35eb4044fc0b34128d58f6577ebbeb0cd94a12c796c8234d23c8cefed` | https://www.oklink.com/x-layer/tx/0x5797fcb35eb4044fc0b34128d58f6577ebbeb0cd94a12c796c8234d23c8cefed |
@@ -136,7 +136,7 @@ Swap helper: 0xBfac0c2d0275e904c9724A2f5c175d3c683cD5E5
 ```
 Tx A (OK swap succeeds):   0xc1e000adb73abc2161cc540d767fd8459fac1e95556715631a2520343880845d
 Tx B (setRisk DANGER):     0x08b3d9bf745a8cdd5a2d68a67d41930588cd5526ec6c5168d055420ac04c0f5e
-Tx C (DANGER swap reverts):0xea871ff345cfe4c79ea58a18c08da45088166236676b34ff8184352e265e9c0b
+Tx C (DANGER swap reverts):0xcfc6156518703d0e48d662b2d79105f49557f709bbe4e19d311fbe012674a0e4
 Tx D (claimRefund):        0x5ce473dcb5027700d6b4f993563f1c63530b40ec6fbce507baea3433f1950696
 ```
 
