@@ -442,6 +442,44 @@ export function shortAddr(a: string, left = 6, right = 4): string {
   return `${a.slice(0, left)}…${a.slice(-right)}`;
 }
 
+// ---------- Real broadcast: sign a swap, broadcast it, show its receipt ----------
+
+export type BroadcastReceipt = {
+  status: '0x0' | '0x1';
+  gasUsed: string;
+  blockNumber: string;
+};
+
+export type BroadcastStep =
+  | { kind: 'idle' }
+  | { kind: 'awaiting-signature' }
+  | { kind: 'submitted'; txHash: string }
+  | { kind: 'reverted'; txHash: string; receipt: BroadcastReceipt }
+  | { kind: 'succeeded'; txHash: string; receipt: BroadcastReceipt }
+  | { kind: 'rejected'; reason: string };
+
+/**
+ * Send a real, signed BASE→RUG swap to the live SwapHelper.
+ * Returns the tx hash the moment the wallet broadcasts it.
+ * We pass an explicit `gas` to bypass the wallet's pre-flight simulation —
+ * otherwise wallets won't broadcast a tx they think will revert.
+ */
+export async function broadcastBuyRug(from: string): Promise<string> {
+  if (!window.ethereum) throw new Error('No injected wallet');
+  const txHash = (await window.ethereum.request({
+    method: 'eth_sendTransaction',
+    params: [
+      {
+        from,
+        to: ADDR.swapHelper,
+        data: SWAP_CALLDATA_RUG_BUY,
+        gas: '0x7a120', // 500_000 gas — enough for the failure or success path
+      },
+    ],
+  })) as string;
+  return txHash;
+}
+
 // ---------- "What if RUG were OK?" — state-override simulation ----------
 
 // Storage slot of `_risk[RUG]` inside RiskOracle.
