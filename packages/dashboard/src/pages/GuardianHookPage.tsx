@@ -6,6 +6,7 @@ import {
   DEMO_TXS,
   POOL_ID,
   RISK_LABELS,
+  SAMPLE_TOKENS,
   XLAYER_RPC,
   connectWallet,
   ensureXLayer,
@@ -13,9 +14,11 @@ import {
   formatEther,
   okLinkAddr,
   okLinkTx,
+  scanTokenForSimulation,
   shortAddr,
   simulateRugProofSwap,
   type GuardianHookState,
+  type ScanOutcome,
   type SwapAttemptResult,
 } from '../lib/guardianHook';
 
@@ -113,6 +116,8 @@ export function GuardianHookPage() {
       />
 
       <StatsBar state={state} />
+
+      <TokenSimulator />
 
       <HowItWorks />
 
@@ -315,6 +320,175 @@ function Stat({ label, value, unit, valueClass, hint }: { label: string; value: 
 }
 
 // ============================================================
+// Token simulator — paste any X Layer token, see what the hook would do
+// ============================================================
+
+function TokenSimulator() {
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState<ScanOutcome | null>(null);
+  const [err, setErr] = useState('');
+
+  const run = async (addressOverride?: string) => {
+    const addr = (addressOverride ?? input).trim();
+    if (!addr) {
+      setErr('Paste an X Layer token address.');
+      return;
+    }
+    setBusy(true);
+    setErr('');
+    setOutcome(null);
+    if (addressOverride) setInput(addressOverride);
+    try {
+      const r = await scanTokenForSimulation(addr);
+      setOutcome(r);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Scan failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="py-14 border-t border-border">
+      <SectionHeader
+        eyebrow="Test it on any X Layer token"
+        title="Paste a token. See what the hook would do."
+        subtitle="The exact same RUGNOT Guardian that powers the live pool, run against any address you give it. On-chain oracle read + agent verdict — no hardcoded list."
+      />
+
+      <div className="mt-8 grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Input column */}
+        <div className="lg:col-span-7">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => { setInput(e.target.value); setErr(''); }}
+              onKeyDown={(e) => e.key === 'Enter' && void run()}
+              placeholder="0x… any token address on X Layer"
+              className="flex-1 bg-bg-surface border border-border focus:border-accent-safe outline-none px-4 py-3 font-mono text-xs text-primary placeholder:text-secondary/40 transition"
+              disabled={busy}
+            />
+            <button
+              onClick={() => void run()}
+              disabled={busy}
+              className="border border-accent-safe/60 bg-accent-safe/10 hover:bg-accent-safe/20 px-6 py-3 font-mono text-[11px] font-bold tracking-widest uppercase text-accent-safe transition disabled:opacity-50"
+            >
+              {busy ? 'Scanning…' : 'Scan & simulate →'}
+            </button>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2 items-center">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-secondary/60">Try:</span>
+            {SAMPLE_TOKENS.map((t) => (
+              <button
+                key={t.address}
+                onClick={() => void run(t.address)}
+                disabled={busy}
+                className="font-mono text-[10px] uppercase tracking-widest text-secondary hover:text-accent-safe border border-border hover:border-accent-safe/40 px-2 py-1 transition disabled:opacity-40"
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {err && <p className="mt-3 font-mono text-[11px] text-accent-danger">{err}</p>}
+
+          <p className="mt-6 font-mono text-[10px] text-secondary/50 leading-relaxed max-w-md">
+            The simulator reads the RiskOracle directly on-chain, and (if the RUGNOT agent backend is reachable) also runs a live 5-layer Guardian scan. The hook decision below is what the actual pool contract would do.
+          </p>
+        </div>
+
+        {/* Output column */}
+        <div className="lg:col-span-5">
+          {!outcome && !busy && (
+            <div className="h-full min-h-[200px] border border-dashed border-border flex items-center justify-center p-6">
+              <p className="font-mono text-[11px] text-secondary/50 text-center max-w-xs">
+                Paste a token and click scan. We&apos;ll show the agent verdict, the on-chain oracle state, and the hook&apos;s decision.
+              </p>
+            </div>
+          )}
+          {busy && (
+            <div className="h-full min-h-[200px] border border-border flex items-center justify-center">
+              <div className="font-mono text-[11px] text-secondary/60 animate-pulse">running 5-layer scan…</div>
+            </div>
+          )}
+          {outcome && <SimulatorOutcome outcome={outcome} />}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SimulatorOutcome({ outcome }: { outcome: ScanOutcome }) {
+  const decision = outcome.hookDecision;
+  const decisionLabel =
+    decision === 'BLOCK' ? 'Hook would REVERT this swap' :
+    decision === 'ALLOW' ? 'Hook would ALLOW this swap' :
+    "No verdict yet — push to oracle to enable";
+
+  const containerCls =
+    decision === 'BLOCK' ? 'border-accent-danger/60 bg-accent-danger/5' :
+    decision === 'ALLOW' ? 'border-accent-safe/60 bg-accent-safe/5' :
+    'border-accent-caution/60 bg-accent-caution/5';
+
+  const labelCls =
+    decision === 'BLOCK' ? 'text-accent-danger' :
+    decision === 'ALLOW' ? 'text-accent-safe' :
+    'text-accent-caution';
+
+  return (
+    <div className={`border p-5 ${containerCls}`}>
+      <div className={`font-mono text-[10px] uppercase tracking-widest mb-2 ${labelCls}`}>
+        Hook decision
+      </div>
+      <div className="font-sans text-xl font-bold text-primary leading-tight">
+        {decisionLabel}
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-3 font-mono text-[10px] uppercase tracking-widest">
+        <div>
+          <div className="text-secondary/70">On-chain oracle</div>
+          <div className={`text-sm normal-case mt-0.5 font-bold ${outcome.onchain.risk === 3 ? 'text-accent-danger' : outcome.onchain.risk === 2 ? 'text-accent-caution' : outcome.onchain.risk === 1 ? 'text-accent-safe' : 'text-secondary'}`}>
+            {outcome.onchain.label}
+          </div>
+          {outcome.onchain.updatedAt > 0 && (
+            <div className="text-secondary/50 normal-case mt-0.5">
+              updated {new Date(outcome.onchain.updatedAt * 1000).toLocaleString()}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <div className="text-secondary/70">Live agent (5-layer)</div>
+          {outcome.agent ? (
+            <>
+              <div className={`text-sm normal-case mt-0.5 font-bold ${outcome.agent.level === 'DANGER' ? 'text-accent-danger' : outcome.agent.level === 'CAUTION' ? 'text-accent-caution' : 'text-accent-safe'}`}>
+                {outcome.agent.level} · {outcome.agent.score}/100
+              </div>
+              <div className="text-secondary/50 normal-case mt-0.5">
+                {outcome.agent.passedChecks}/{outcome.agent.totalChecks} checks · {outcome.agent.executionTimeMs}ms
+              </div>
+            </>
+          ) : (
+            <div className="text-secondary/50 normal-case mt-0.5">
+              backend not running
+            </div>
+          )}
+        </div>
+      </div>
+
+      {outcome.agentError && (
+        <p className="mt-4 font-mono text-[10px] text-secondary/40">
+          agent: {outcome.agentError} — using on-chain oracle only
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 // How it works — 3-step diagram
 // ============================================================
 
@@ -400,22 +574,34 @@ function Timeline() {
               }`}>{b.state}</span>
             </div>
             <p className="font-mono text-[11px] text-secondary mt-2 leading-relaxed">{b.narrative}</p>
-            <a href={okLinkTx(b.tx.hash)} target="_blank" rel="noreferrer"
-               className="inline-flex items-center gap-2 mt-2 font-mono text-[10px] text-secondary/70 hover:text-accent-safe transition">
-              <span>{shortAddr(b.tx.hash, 10, 8)}</span>
-              <span>↗ OKLink</span>
-            </a>
+            <div className="mt-3 flex items-center gap-3 flex-wrap">
+              <a href={okLinkTx(b.tx.hash)} target="_blank" rel="noreferrer"
+                 className={`inline-flex items-center gap-2 px-3 py-1.5 border font-mono text-[10px] uppercase tracking-widest transition ${
+                   b.tone === 'safe'
+                     ? 'border-accent-safe/40 text-accent-safe hover:bg-accent-safe/10'
+                     : b.tone === 'caution'
+                       ? 'border-accent-caution/40 text-accent-caution hover:bg-accent-caution/10'
+                       : 'border-accent-danger/40 text-accent-danger hover:bg-accent-danger/10'
+                 }`}>
+                <span>View tx on OKLink</span>
+                <span>↗</span>
+              </a>
+              <code className="font-mono text-[10px] text-secondary/50 break-all">{b.tx.hash}</code>
+            </div>
           </li>
         ))}
         <li className="relative pl-12 pt-4 border-t border-border/40">
           <span className="absolute left-0 top-4 h-8 w-8 flex items-center justify-center font-mono text-[9px] font-bold border-2 border-accent-info/60 text-accent-info bg-bg">★</span>
           <div className="font-sans text-sm font-bold text-primary">RUGNOT agent writes a verdict</div>
           <p className="font-mono text-[11px] text-secondary mt-1">Same agent wallet, autonomous push from the off-chain runtime.</p>
-          <a href={okLinkTx(AGENT_PUSH_TX)} target="_blank" rel="noreferrer"
-             className="inline-flex items-center gap-2 mt-2 font-mono text-[10px] text-secondary/70 hover:text-accent-info transition">
-            <span>{shortAddr(AGENT_PUSH_TX, 10, 8)}</span>
-            <span>↗ OKLink</span>
-          </a>
+          <div className="mt-3 flex items-center gap-3 flex-wrap">
+            <a href={okLinkTx(AGENT_PUSH_TX)} target="_blank" rel="noreferrer"
+               className="inline-flex items-center gap-2 px-3 py-1.5 border border-accent-info/40 text-accent-info hover:bg-accent-info/10 font-mono text-[10px] uppercase tracking-widest transition">
+              <span>View tx on OKLink</span>
+              <span>↗</span>
+            </a>
+            <code className="font-mono text-[10px] text-secondary/50 break-all">{AGENT_PUSH_TX}</code>
+          </div>
         </li>
       </ol>
     </section>

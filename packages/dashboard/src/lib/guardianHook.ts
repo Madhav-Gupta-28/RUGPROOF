@@ -345,3 +345,96 @@ export function shortAddr(a: string, left = 6, right = 4): string {
   if (!a || a.length < left + right + 2) return a;
   return `${a.slice(0, left)}…${a.slice(-right)}`;
 }
+
+// ---------- Arbitrary-token scan simulator ----------
+
+export type ScanOutcome = {
+  // From the live RUGNOT agent (if reachable)
+  agent?: {
+    level: 'GO' | 'CAUTION' | 'DANGER';
+    score: number; // 0-100
+    executionTimeMs: number;
+    passedChecks: number;
+    totalChecks: number;
+  };
+  agentError?: string;
+  // On-chain oracle direct read
+  onchain: {
+    risk: number; // 0=UNKNOWN 1=OK 2=CAUTION 3=DANGER
+    label: string;
+    scoreBps: number;
+    updatedAt: number; // unix
+  };
+  // Derived: would the hook block this swap?
+  hookDecision: 'BLOCK' | 'ALLOW' | 'UNKNOWN';
+};
+
+export async function scanTokenForSimulation(token: string): Promise<ScanOutcome> {
+  const addr = token.trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) {
+    throw new Error('Invalid X Layer address.');
+  }
+
+  // Fire both in parallel — agent (if up) + on-chain oracle (always reachable)
+  const [agentRes, riskRes, scoreRes, updRes] = await Promise.allSettled([
+    fetch(`/api/public/scan?token=${addr}`, { signal: AbortSignal.timeout(10_000) }).then(async (r) => {
+      if (!r.ok) throw new Error(`scan API ${r.status}`);
+      return r.json() as Promise<{
+        level: 'GO' | 'CAUTION' | 'DANGER';
+        score: number;
+        executionTimeMs: number;
+        checks: { passed: boolean }[];
+      }>;
+    }),
+    ethCall(ADDR.riskOracle, encodeCall(SEL.riskOf, [addr])).then((h) => Number(hexToBigInt(h))),
+    ethCall(ADDR.riskOracle, encodeCall(SEL.scoreBpsOf, [addr])).then((h) => Number(hexToBigInt(h))),
+    ethCall(ADDR.riskOracle, encodeCall(SEL.updatedAt, [addr])).then((h) => Number(hexToBigInt(h))),
+  ]);
+
+  const out: ScanOutcome = {
+    onchain: {
+      risk: riskRes.status === 'fulfilled' ? riskRes.value : 0,
+      label: '',
+      scoreBps: scoreRes.status === 'fulfilled' ? scoreRes.value : 0,
+      updatedAt: updRes.status === 'fulfilled' ? updRes.value : 0,
+    },
+    hookDecision: 'UNKNOWN',
+  };
+  out.onchain.label = RISK_LABELS[out.onchain.risk] ?? 'UNKNOWN';
+
+  if (agentRes.status === 'fulfilled') {
+    const v = agentRes.value;
+    out.agent = {
+      level: v.level,
+      score: v.score,
+      executionTimeMs: v.executionTimeMs,
+      passedChecks: v.checks?.filter((c) => c.passed).length ?? 0,
+      totalChecks: v.checks?.length ?? 0,
+    };
+  } else {
+    out.agentError =
+      agentRes.reason instanceof Error
+        ? agentRes.reason.message
+        : 'agent backend unreachable';
+  }
+
+  // Hook decision: prefer on-chain (that's what the actual contract reads).
+  // If on-chain is UNKNOWN, fall back to agent verdict as a what-if.
+  const onchainDanger = out.onchain.risk === 3;
+  const onchainOk = out.onchain.risk === 1 || out.onchain.risk === 2;
+  if (onchainDanger) out.hookDecision = 'BLOCK';
+  else if (onchainOk) out.hookDecision = 'ALLOW';
+  else if (out.agent?.level === 'DANGER') out.hookDecision = 'BLOCK';
+  else if (out.agent && (out.agent.level === 'GO' || out.agent.level === 'CAUTION')) out.hookDecision = 'ALLOW';
+  else out.hookDecision = 'UNKNOWN';
+
+  return out;
+}
+
+// A few well-known X Layer tokens for one-click demos.
+// (Same addresses RUGNOT's existing /scan page uses.)
+export const SAMPLE_TOKENS = [
+  { label: 'USDT (clean)', address: '0x779ded0c9e1022225f8e0630b35a9b54be713736', expected: 'ALLOW' as const },
+  { label: 'WOKB (clean)', address: '0x75E1AB5E0e3BA13b3520349F069350441CF53c0A', expected: 'ALLOW' as const },
+  { label: 'RUG (our mock — DANGER)', address: ADDR.rug, expected: 'BLOCK' as const },
+];
