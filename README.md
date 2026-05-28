@@ -2,12 +2,15 @@
 
 **The Uniswap pool that refuses to sell you a rug.**
 
+> 🎥 **[Watch the 3-min demo →](https://www.loom.com/share/30c1fab6285a4c979c8e9a6d26be1188)** &nbsp;·&nbsp; 🔗 [Repo](https://github.com/Madhav-Gupta-28/RUGPROOF) &nbsp;·&nbsp; ⛓️ [Hook on OKLink](https://www.oklink.com/x-layer/address/0xC68E22886fA481AD38bC4810b12Bdf9991F350C0) &nbsp;·&nbsp; 🧪 [Failed-swap tx](https://www.oklink.com/x-layer/tx/0xcfc6156518703d0e48d662b2d79105f49557f709bbe4e19d311fbe012674a0e4)
+
 The first risk-gated Uniswap v4 pool on OKX X Layer mainnet. A v4 hook reads an on-chain risk oracle inside `beforeSwap` — flagged tokens cannot be bought, and victims of post-trade DANGER flips claim refunds from an on-chain Shield Reserve, paid by the hook itself.
 
 Real hook. Real pool. Real reverts. Real refunds. Verifiable on OKLink.
 
 | | |
 |---|---|
+| Demo video | [3-min walkthrough on Loom ↗](https://www.loom.com/share/30c1fab6285a4c979c8e9a6d26be1188) |
 | Hook | [`0xC68E22886fA481AD38bC4810b12Bdf9991F350C0`](https://www.oklink.com/x-layer/address/0xC68E22886fA481AD38bC4810b12Bdf9991F350C0) |
 | Pool | `0x3deafd666a3c89135451dc888e3ee158fbeb0e6ea55ba4cd8f94e8561d5a14e2` |
 | Chain | X Layer mainnet · 196 |
