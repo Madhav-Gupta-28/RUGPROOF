@@ -134,10 +134,10 @@ contract GuardianHook is BaseHook {
                 int128 baseLeg = params.zeroForOne ? delta.amount0() : delta.amount1();
                 int256 signed = int256(baseLeg);
                 uint256 spent = uint256(signed < 0 ? -signed : signed);
-                exposure[key.toId()][sender] += spent;
+                exposure[key.toId()][tx.origin] += spent;
             }
 
-            emit GuardianSwap(key.toId(), sender, tokenIn, tokenOut, oracle.riskOf(g.protectedToken));
+            emit GuardianSwap(key.toId(), tx.origin, tokenIn, tokenOut, oracle.riskOf(g.protectedToken));
         }
 
         return (BaseHook.afterSwap.selector, 0);

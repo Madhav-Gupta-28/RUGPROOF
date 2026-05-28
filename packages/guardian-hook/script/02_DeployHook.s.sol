@@ -8,6 +8,7 @@ import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 
 import {IRiskOracle} from "../src/interfaces/IRiskOracle.sol";
 import {GuardianHook} from "../src/GuardianHook.sol";
+import {XLayerConfig} from "./base/XLayerConfig.sol";
 
 contract DeployHookScript is Script {
     address internal constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
@@ -15,7 +16,7 @@ contract DeployHookScript is Script {
     function run() external returns (GuardianHook hook, bytes32 salt) {
         uint256 pk = vm.envUint("AGENT_PK");
         address agent = vm.addr(pk);
-        address poolManager = vm.envAddress("POOL_MANAGER");
+        address poolManager = vm.envOr("POOL_MANAGER", XLayerConfig.POOL_MANAGER);
         address oracle = vm.envAddress("RISK_ORACLE");
 
         uint160 flags =

@@ -299,20 +299,20 @@ later DANGER flips claim refunds from an on-chain `ShieldReserve`.
 
 | Contract       | Address |
 |----------------|---------|
-| RiskOracle     | `<FILL>` |
-| GuardianHook   | `<FILL>` |
-| BASE (mock)    | `<FILL>` |
-| RUG  (mock)    | `<FILL>` |
-| Pool (BASE/RUG)| `<FILL>` (PoolId) |
+| RiskOracle     | [`0x999499a47495bA2005E5ceB06f192F45Bbcd2F50`](https://www.oklink.com/x-layer/address/0x999499a47495bA2005E5ceB06f192F45Bbcd2F50) |
+| GuardianHook   | [`0xC68E22886fA481AD38bC4810b12Bdf9991F350C0`](https://www.oklink.com/x-layer/address/0xC68E22886fA481AD38bC4810b12Bdf9991F350C0) |
+| BASE (mock)    | [`0xb437E753142759A386548Ef00e8E1775d1A2A338`](https://www.oklink.com/x-layer/address/0xb437E753142759A386548Ef00e8E1775d1A2A338) |
+| RUG  (mock)    | [`0xB585ABBB035832c0b357a66F1c338C0A34d41482`](https://www.oklink.com/x-layer/address/0xB585ABBB035832c0b357a66F1c338C0A34d41482) |
+| Pool (BASE/RUG)| `0x3deafd666a3c89135451dc888e3ee158fbeb0e6ea55ba4cd8f94e8561d5a14e2` (PoolId) |
 
 **On-chain proof:**
 
 | Step | Tx |
 |------|----|
-| OK swap (success)   | [OKLink](<FILL>) |
-| Flip to DANGER      | [OKLink](<FILL>) |
-| DANGER swap (revert)| [OKLink](<FILL>) |
-| Refund claim        | [OKLink](<FILL>) |
+| OK swap (success)   | [OKLink](https://www.oklink.com/x-layer/tx/0xc1e000adb73abc2161cc540d767fd8459fac1e95556715631a2520343880845d) |
+| Flip to DANGER      | [OKLink](https://www.oklink.com/x-layer/tx/0x08b3d9bf745a8cdd5a2d68a67d41930588cd5526ec6c5168d055420ac04c0f5e) |
+| DANGER swap (revert)| [OKLink](https://www.oklink.com/x-layer/tx/0xea871ff345cfe4c79ea58a18c08da45088166236676b34ff8184352e265e9c0b) |
+| Refund claim        | [OKLink](https://www.oklink.com/x-layer/tx/0x5ce473dcb5027700d6b4f993563f1c63530b40ec6fbce507baea3433f1950696) |
 
 Preflight: `cast chain-id --rpc-url $XLAYER_RPC` must return `196`.
 

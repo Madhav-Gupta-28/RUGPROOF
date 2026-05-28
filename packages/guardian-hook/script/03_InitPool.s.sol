@@ -10,6 +10,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
 import {MockERC20} from "../src/mocks/MockERC20.sol";
 import {GuardianHook} from "../src/GuardianHook.sol";
+import {XLayerConfig} from "./base/XLayerConfig.sol";
 
 contract InitPoolScript is Script {
     using PoolIdLibrary for PoolKey;
@@ -21,7 +22,7 @@ contract InitPoolScript is Script {
         returns (address base, address rug, PoolKey memory key, PoolId poolId)
     {
         uint256 pk = vm.envUint("AGENT_PK");
-        address poolManager = vm.envAddress("POOL_MANAGER");
+        address poolManager = vm.envOr("POOL_MANAGER", XLayerConfig.POOL_MANAGER);
         address hookAddress = vm.envAddress("GUARDIAN_HOOK");
 
         vm.startBroadcast(pk);
