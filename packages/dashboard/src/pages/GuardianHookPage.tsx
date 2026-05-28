@@ -16,7 +16,9 @@ import {
   okLinkTx,
   scanTokenForSimulation,
   shortAddr,
+  simulateAllowCaseSwap,
   simulateRugProofSwap,
+  type AllowCaseResult,
   type GuardianHookState,
   type ScanOutcome,
   type SwapAttemptResult,
@@ -331,6 +333,8 @@ function TokenSimulator() {
   const [err, setErr] = useState('');
   const [liveBusy, setLiveBusy] = useState(false);
   const [liveResult, setLiveResult] = useState<SwapAttemptResult | null>(null);
+  const [allowBusy, setAllowBusy] = useState(false);
+  const [allowResult, setAllowResult] = useState<AllowCaseResult | null>(null);
 
   const run = async (addressOverride?: string) => {
     const addr = (addressOverride ?? input).trim();
@@ -357,11 +361,23 @@ function TokenSimulator() {
   const runLive = async () => {
     setLiveBusy(true);
     setLiveResult(null);
+    setAllowResult(null);
     try {
       const r = await simulateRugProofSwap('0x000000000000000000000000000000000000dEaD');
       setLiveResult(r);
     } finally {
       setLiveBusy(false);
+    }
+  };
+
+  const runAllowCase = async () => {
+    setAllowBusy(true);
+    setAllowResult(null);
+    try {
+      const r = await simulateAllowCaseSwap(ADDR.agent);
+      setAllowResult(r);
+    } finally {
+      setAllowBusy(false);
     }
   };
 
@@ -439,6 +455,9 @@ function TokenSimulator() {
               onVerifyLive={() => void runLive()}
               liveBusy={liveBusy}
               liveResult={liveResult}
+              onTryAllowCase={() => void runAllowCase()}
+              allowBusy={allowBusy}
+              allowResult={allowResult}
             />
           )}
         </div>
@@ -453,12 +472,18 @@ function SimulatorOutcome({
   onVerifyLive,
   liveBusy,
   liveResult,
+  onTryAllowCase,
+  allowBusy,
+  allowResult,
 }: {
   outcome: ScanOutcome;
   hasLivePool: boolean;
   onVerifyLive: () => void;
   liveBusy: boolean;
   liveResult: SwapAttemptResult | null;
+  onTryAllowCase: () => void;
+  allowBusy: boolean;
+  allowResult: AllowCaseResult | null;
 }) {
   const decision = outcome.hookDecision;
   const decisionLabel =
@@ -527,7 +552,13 @@ function SimulatorOutcome({
       {decision === 'BLOCK' && (
         <div className="mt-5 pt-5 border-t border-border/60">
           {hasLivePool ? (
-            <LiveVerify onClick={onVerifyLive} busy={liveBusy} result={liveResult} />
+            <ProofPanel
+              onClick={onVerifyLive}
+              busy={liveBusy || allowBusy}
+              revertResult={liveResult}
+              allowResult={allowResult}
+              onAllow={onTryAllowCase}
+            />
           ) : (
             <NoLivePoolNote />
           )}
@@ -537,56 +568,187 @@ function SimulatorOutcome({
   );
 }
 
-function LiveVerify({ onClick, busy, result }: { onClick: () => void; busy: boolean; result: SwapAttemptResult | null }) {
-  if (!result) {
+// ============================================================
+// ProofPanel — side-by-side "DANGER reverts" vs "OK succeeds"
+// ============================================================
+
+function ProofPanel({
+  onClick,
+  busy,
+  revertResult,
+  allowResult,
+  onAllow,
+}: {
+  onClick: () => void;
+  busy: boolean;
+  revertResult: SwapAttemptResult | null;
+  allowResult: AllowCaseResult | null;
+  onAllow: () => void;
+}) {
+  // Auto-fire the allow-case the moment the revert proof lands.
+  useEffect(() => {
+    if (revertResult?.kind === 'reverted' && !allowResult) {
+      onAllow();
+    }
+  }, [revertResult, allowResult, onAllow]);
+
+  const hasResults = !!revertResult;
+
+  if (!hasResults) {
     return (
       <div>
-        <div className="font-mono text-[10px] uppercase tracking-widest text-secondary/70 mb-2">Prove it</div>
-        <p className="font-mono text-[11px] text-secondary mb-3 leading-relaxed">
-          We have a live RUGPROOF pool deployed for this token on X Layer mainnet. Click below to send an actual <code className="text-primary">eth_call</code> to the pool — the hook will revert and we&apos;ll show you the raw decoded error.
-        </p>
+        <div className="font-mono text-[10px] uppercase tracking-widest text-secondary/70 mb-3">
+          Prove it on mainnet, in real time
+        </div>
         <button
           onClick={onClick}
           disabled={busy}
-          className="w-full border-2 border-accent-danger bg-accent-danger/10 hover:bg-accent-danger/20 px-4 py-3 font-mono text-[11px] font-bold tracking-widest uppercase text-accent-danger transition disabled:opacity-50"
+          className="w-full border-2 border-primary bg-primary/5 hover:bg-primary/10 px-4 py-4 font-sans text-base font-bold text-primary transition disabled:opacity-50"
         >
-          {busy ? 'Querying mainnet…' : '▶ Trigger live revert (eth_call)'}
+          {busy ? 'Querying X Layer mainnet…' : '▶ Run both swaps live'}
         </button>
-      </div>
-    );
-  }
-
-  if (result.kind === 'reverted') {
-    return (
-      <div>
-        <div className="font-mono text-[10px] uppercase tracking-widest text-accent-safe mb-2">✓ Verified on mainnet</div>
-        <div className="font-mono text-[13px] text-primary break-all mb-3">{result.reason}</div>
-        <p className="font-mono text-[10px] text-secondary/70 leading-relaxed mb-3">
-          PoolManager wrapped the hook revert as <code className="text-secondary">WrappedError(hook, beforeSwap, …)</code>. The <code className="text-accent-danger">GuardianBlocked(RUG)</code> error was decoded from inside the returnData.
+        <p className="mt-2 font-mono text-[10px] text-secondary/50">
+          Two real eth_calls to the live pool. No gas. ~1 second.
         </p>
-        {result.rawData && (
-          <details className="mb-3">
-            <summary className="font-mono text-[10px] uppercase tracking-widest text-secondary/60 cursor-pointer hover:text-accent-safe">+ raw revert bytes</summary>
-            <pre className="mt-2 font-mono text-[9px] text-secondary/60 bg-bg-surface border border-border p-3 overflow-x-auto break-all whitespace-pre-wrap leading-relaxed">{result.rawData}</pre>
-          </details>
-        )}
-        <div className="flex flex-wrap gap-2">
-          <a
-            href={okLinkTx(DEMO_TXS[2].hash)}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 border border-accent-danger/40 hover:bg-accent-danger/10 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-accent-danger transition"
-          >
-            See same call as a real tx ↗
-          </a>
-        </div>
       </div>
     );
   }
 
   return (
-    <div className="font-mono text-[11px] text-accent-caution">
-      Live call returned {result.kind} — check console.
+    <div>
+      <div className="flex items-baseline justify-between mb-3">
+        <div className="font-mono text-[10px] uppercase tracking-widest text-secondary/70">
+          Same pool. Same swap. Two oracle states.
+        </div>
+        <button
+          onClick={onClick}
+          disabled={busy}
+          className="font-mono text-[10px] uppercase tracking-widest text-secondary hover:text-primary transition disabled:opacity-40"
+        >
+          {busy ? 'querying…' : '↻ rerun'}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-px bg-border">
+        <ProofCard
+          state="danger"
+          oracle="RUG = DANGER"
+          status={revertResult?.kind === 'reverted' ? 'REVERTED' : 'pending'}
+          headline={revertResult?.kind === 'reverted' ? 'GuardianBlocked(RUG)' : '…'}
+          subline="hook reverted in beforeSwap"
+          txHash={DEMO_TXS[2].hash}
+          txLabel="Real failed tx on mainnet"
+        />
+        <ProofCard
+          state="ok"
+          oracle="RUG = OK"
+          status={
+            allowResult?.kind === 'succeeded' ? 'SUCCEEDED' :
+            allowResult?.kind === 'override-not-supported' ? 'see Tx A' :
+            'pending'
+          }
+          headline={
+            allowResult?.kind === 'succeeded'
+              ? `+${(Number(allowResult.rugOut) / 1e18).toFixed(2)} RUG`
+              : '…'
+          }
+          subline={
+            allowResult?.kind === 'succeeded'
+              ? `for ${(Number(allowResult.baseIn) / 1e18).toFixed(0)} BASE`
+              : 'swap clears beforeSwap'
+          }
+          txHash={DEMO_TXS[0].hash}
+          txLabel="Real successful tx on mainnet"
+        />
+      </div>
+
+      {/* Raw evidence — collapsed */}
+      <details className="mt-4">
+        <summary className="font-mono text-[10px] uppercase tracking-widest text-secondary/60 cursor-pointer hover:text-primary">
+          + show raw mainnet evidence
+        </summary>
+        <div className="mt-3 space-y-3">
+          {revertResult?.kind === 'reverted' && revertResult.rawData && (
+            <div>
+              <div className="font-mono text-[9px] uppercase tracking-widest text-accent-danger mb-1">
+                wrapped revert bytes (DANGER eth_call)
+              </div>
+              <pre className="font-mono text-[9px] text-secondary/60 bg-bg-surface border border-border p-3 overflow-x-auto break-all whitespace-pre-wrap leading-relaxed">
+                {revertResult.rawData}
+              </pre>
+              <div className="font-mono text-[9px] text-secondary/50 mt-1">
+                PoolManager wraps as <code>WrappedError(hook, beforeSwap, …)</code>; <code>GuardianBlocked(RUG)</code> decoded from returnData.
+              </div>
+            </div>
+          )}
+          {allowResult?.kind === 'succeeded' && (
+            <div>
+              <div className="font-mono text-[9px] uppercase tracking-widest text-accent-safe mb-1">
+                BalanceDelta (OK eth_call, oracle state-override)
+              </div>
+              <pre className="font-mono text-[9px] text-secondary/60 bg-bg-surface border border-border p-3 overflow-x-auto break-all whitespace-pre-wrap leading-relaxed">
+                {allowResult.rawResult}
+              </pre>
+              <div className="font-mono text-[9px] text-secondary/50 mt-1">
+                int256 packing two int128 deltas. Upper 128b = BASE (currency0). Lower 128b = RUG (currency1).
+              </div>
+            </div>
+          )}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function ProofCard({
+  state,
+  oracle,
+  status,
+  headline,
+  subline,
+  txHash,
+  txLabel,
+}: {
+  state: 'danger' | 'ok';
+  oracle: string;
+  status: string;
+  headline: string;
+  subline: string;
+  txHash: string;
+  txLabel: string;
+}) {
+  const isDanger = state === 'danger';
+  const accent = isDanger ? 'accent-danger' : 'accent-safe';
+  const bg = isDanger ? 'bg-accent-danger/5' : 'bg-accent-safe/5';
+  const accentText = isDanger ? 'text-accent-danger' : 'text-accent-safe';
+
+  return (
+    <div className={`bg-bg ${bg} p-5`}>
+      <div className="flex items-center justify-between mb-3">
+        <span className={`font-mono text-[10px] uppercase tracking-widest ${accentText}`}>
+          {isDanger ? '🛑' : '✅'} {oracle}
+        </span>
+        <span className={`font-mono text-[9px] uppercase tracking-widest px-2 py-0.5 border border-${accent}/40 ${accentText}`}>
+          {status}
+        </span>
+      </div>
+      <div className={`font-sans text-2xl font-bold ${isDanger ? 'text-accent-danger' : 'text-accent-safe'} break-all leading-tight`}>
+        {headline}
+      </div>
+      <div className="font-mono text-[10px] text-secondary/70 mt-1">{subline}</div>
+
+      <a
+        href={okLinkTx(txHash)}
+        target="_blank"
+        rel="noreferrer"
+        className={`mt-4 inline-flex items-center justify-between w-full gap-2 px-3 py-2 border border-${accent}/40 hover:bg-${accent}/10 transition group`}
+      >
+        <span className={`font-mono text-[9px] uppercase tracking-widest ${accentText}`}>
+          {txLabel}
+        </span>
+        <span className={`font-mono text-[9px] ${accentText} group-hover:translate-x-0.5 transition`}>↗</span>
+      </a>
+      <code className="block mt-2 font-mono text-[9px] text-secondary/50 break-all">{txHash}</code>
     </div>
   );
 }

@@ -346,6 +346,69 @@ export function shortAddr(a: string, left = 6, right = 4): string {
   return `${a.slice(0, left)}…${a.slice(-right)}`;
 }
 
+// ---------- "What if RUG were OK?" — state-override simulation ----------
+
+// Storage slot of `_risk[RUG]` inside RiskOracle.
+//   keccak256(abi.encode(RUG_ADDRESS, uint256(1)))
+//   slot 1 because layout is: 0=owner, 1=_risk, 2=_score, 3=_updatedAt
+export const ORACLE_RUG_RISK_SLOT =
+  '0x57231386ff59acdcc7604cf4c1efccbca5e9c6270b1c50e90a29ec7705821fe5';
+
+export type AllowCaseResult =
+  | { kind: 'succeeded'; baseIn: bigint; rugOut: bigint; rawResult: string }
+  | { kind: 'reverted-still'; reason: string }
+  | { kind: 'override-not-supported'; message: string };
+
+/**
+ * Simulate the same BASE→RUG swap, but pretend RUG is OK on the oracle.
+ * Uses eth_call's `stateDiff` override — no real state change, no gas, no tx.
+ * Shows judges the SAME call succeeds when only the oracle bit changes.
+ */
+export async function simulateAllowCaseSwap(from: string): Promise<AllowCaseResult> {
+  try {
+    const result = await rpc<string>('eth_call', [
+      { from, to: ADDR.swapHelper, data: SWAP_CALLDATA_RUG_BUY },
+      'latest',
+      {
+        [ADDR.riskOracle]: {
+          stateDiff: {
+            [ORACLE_RUG_RISK_SLOT]:
+              '0x0000000000000000000000000000000000000000000000000000000000000001',
+          },
+        },
+      },
+    ]);
+
+    // Decode BalanceDelta = int256 packing two int128:
+    //   amount0 = upper 128 bits (BASE)
+    //   amount1 = lower 128 bits (RUG)
+    const hex = result.replace(/^0x/, '').padStart(64, '0');
+    const amount0 = signedInt128(hex.slice(0, 32));
+    const amount1 = signedInt128(hex.slice(32, 64));
+    // BASE is currency0, RUG is currency1 (BASE address < RUG address numerically).
+    const baseIn = amount0 < 0n ? -amount0 : amount0;
+    const rugOut = amount1 < 0n ? -amount1 : amount1;
+    return { kind: 'succeeded', baseIn, rugOut, rawResult: result };
+  } catch (err) {
+    const anyErr = err as { message?: string };
+    const msg = anyErr?.message ?? String(err);
+    if (/state override|not supported|invalid argument/i.test(msg)) {
+      return { kind: 'override-not-supported', message: msg };
+    }
+    const decoded = decodeSwapError(err);
+    return {
+      kind: 'reverted-still',
+      reason: decoded.kind === 'reverted' ? decoded.reason : msg,
+    };
+  }
+}
+
+function signedInt128(hex32: string): bigint {
+  const u = BigInt('0x' + hex32);
+  const signBit = 1n << 127n;
+  return u & signBit ? u - (1n << 128n) : u;
+}
+
 // ---------- Arbitrary-token scan simulator ----------
 
 export type ScanOutcome = {
