@@ -1,0 +1,15 @@
+node_modules
+dist
+.env
+.env.local
+.env.production
+.rugnot-state.json
+data/
+.DS_Store
+.vercel
+
+# Foundry (install with: cd packages/guardian-hook && git submodule update --init --recursive)
+packages/guardian-hook/lib/
+packages/guardian-hook/cache/
+packages/guardian-hook/out/
+packages/guardian-hook/broadcast/
